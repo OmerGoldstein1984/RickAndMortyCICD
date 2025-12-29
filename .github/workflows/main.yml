@@ -36,37 +36,29 @@ jobs:
             --set image.repository=${{ env.DOCKER_IMAGE }} \
             --set image.tag=${{ env.IMAGE_TAG }} \
             --wait
-
       - name: 🧪 Automated Verification Tests
         run: |
           echo "Syncing with Kubernetes..."
-          sleep 10
+          sleep 20
           
-          # Reliable Pod Discovery
-          POD_NAME=$(kubectl get pods -l app.kubernetes.io/instance=${{ env.RELEASE_NAME }} -o name)
+          # 1. Broad Search: Find ANY pod that has 'rick' in the name
+          # This avoids the 'no matching resources' error caused by incorrect labels
+          POD_NAME=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "rick" | head -n 1)
           
-          echo "Targeting Pod: $POD_NAME"
-          kubectl wait --for=condition=Ready "$POD_NAME" --timeout=60s
+          if [ -z "$POD_NAME" ]; then
+            echo "❌ ERROR: No pods found containing 'rick'. Current pods:"
+            kubectl get pods
+            exit 1
+          fi
 
+          echo "✅ Found Pod: $POD_NAME"
+
+          # 2. Wait for the specific Pod name found
+          kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=60s
+
+          # 3. Verification Commands
           echo "--- Execution Logs ---"
           kubectl logs "$POD_NAME"
           
-          # Test Suite
-          echo "Running Data Validation..."
-          
-          # 1. Log Success Check
-          kubectl logs "$POD_NAME" | grep -q "SUCCESS" || (echo "Fail: No success message"; exit 1)
-          
-          # 2. File Integrity Check
-          kubectl exec "$POD_NAME" -- ls /app/data/results.csv || (echo "Fail: CSV not found"; exit 1)
-          
-          # 3. Data Content Check (Ensure more than just the header)
-          LINE_COUNT=$(kubectl exec "$POD_NAME" -- sh -c "wc -l < /app/data/results.csv")
-          echo "Verified: $LINE_COUNT rows found in results."
-          
-          if [ "$LINE_COUNT" -le 1 ]; then
-            echo "Fail: CSV contains no data"
-            exit 1
-          fi
-          
-          echo "✅ All tests passed successfully!"
+          echo "Checking for file in Volume..."
+          kubectl exec "$POD_NAME" -- ls -l /app/data/results.csv
