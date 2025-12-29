@@ -1,64 +1,72 @@
-name: Rick and Morty Pipeline
+name: Rick and Morty CI/CD
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Grouping common variables at the top
+env:
+  DOCKER_IMAGE: omergldb/rick-morty-script
+  IMAGE_TAG: v6
+  RELEASE_NAME: rick-release
+  KIND_CLUSTER_NAME: chart-testing
 
 jobs:
-  kubernetes-test:
+  validate-and-deploy:
+    name: Build, Deploy & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: 🚀 Checkout Repository
+        uses: actions/checkout@v4
 
-      # 1. Initiate small kubernetes cluster (Kind)
-      - name: Create KinD Cluster
-        uses: helm/kind-action@v1.4.0
+      - name: 🏗️ Setup KinD Cluster
+        uses: helm/kind-action@v1.8.0
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # 2. Create the Docker image from Dockerfile
-      - name: Build local Docker image
+      - name: 📦 Build & Load Docker Image
         run: |
-          docker build -t omergldb/rick-morty-script:v6 .
-          # Load the image into the Kind nodes so it's available for deployment
-          kind load docker-image omergldb/rick-morty-script:v6 --name chart-testing
+          docker build -t ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }} .
+          kind load docker-image ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
 
-      # 3. Deploy the application to the local cluster
-      - name: Deploy Helm Chart
+      - name: ☸️ Deploy Application via Helm
         run: |
-          helm install rick-release ./rick-morty-chart \
-            --set image.repository=omergldb/rick-morty-script \
-            --set image.tag=v6
+          helm install ${{ env.RELEASE_NAME }} ./rick-morty-chart \
+            --set image.repository=${{ env.DOCKER_IMAGE }} \
+            --set image.tag=${{ env.IMAGE_TAG }} \
+            --wait
 
-      # 4. Run tests and Verify Output
-      - name: Verify Results
+      - name: 🧪 Automated Verification Tests
         run: |
-          echo "Waiting for Pod to be ready..."
-          sleep 20
+          echo "Syncing with Kubernetes..."
+          sleep 10
           
-          POD_NAME=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "rick-release" | head -n 1)
-          echo "Testing Pod: $POD_NAME"
-
-          kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=90s
+          # Reliable Pod Discovery
+          POD_NAME=$(kubectl get pods -l app.kubernetes.io/instance=${{ env.RELEASE_NAME }} -o name)
           
-          echo "--- START OF POD LOGS ---"
+          echo "Targeting Pod: $POD_NAME"
+          kubectl wait --for=condition=Ready "$POD_NAME" --timeout=60s
+
+          echo "--- Execution Logs ---"
           kubectl logs "$POD_NAME"
-          echo "--- END OF POD LOGS ---"
-
-          # Check for the file
-          if kubectl exec "$POD_NAME" -- ls /app/data/results.csv; then
-            echo "SUCCESS: File exists in volume."
-          else
-            echo "ERROR: File /app/data/results.csv not found!"
-            exit 1
-          fi
-
-          # FIXED: Run the command INSIDE the pod to count lines
-          DATA_COUNT=$(kubectl exec "$POD_NAME" -- sh -c "wc -l < /app/data/results.csv")
-          echo "Found $DATA_COUNT lines in CSV."
           
-          # Final Step: Ensure there is actually data (more than 1 line for header)
-          if [ "$DATA_COUNT" -gt 1 ]; then
-            echo "Pipeline Verified: Data successfully written."
-          else
-            echo "Error: CSV is empty."
+          # Test Suite
+          echo "Running Data Validation..."
+          
+          # 1. Log Success Check
+          kubectl logs "$POD_NAME" | grep -q "SUCCESS" || (echo "Fail: No success message"; exit 1)
+          
+          # 2. File Integrity Check
+          kubectl exec "$POD_NAME" -- ls /app/data/results.csv || (echo "Fail: CSV not found"; exit 1)
+          
+          # 3. Data Content Check (Ensure more than just the header)
+          LINE_COUNT=$(kubectl exec "$POD_NAME" -- sh -c "wc -l < /app/data/results.csv")
+          echo "Verified: $LINE_COUNT rows found in results."
+          
+          if [ "$LINE_COUNT" -le 1 ]; then
+            echo "Fail: CSV contains no data"
             exit 1
           fi
+          
+          echo "✅ All tests passed successfully!"
