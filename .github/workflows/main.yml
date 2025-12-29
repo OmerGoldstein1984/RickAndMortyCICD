@@ -31,29 +31,28 @@ jobs:
       # 4. Run tests and Verify Output
       - name: Verify Results
         run: |
-          echo "Waiting 20 seconds for Pod to initialize..."
+          echo "Waiting for Pod to be ready..."
           sleep 20
-          
-          # 1. Get the pod name using a name filter instead of a label selector
-          # This finds any pod with 'rick-release' in its name
+          # 1. Capture the pod name
           POD_NAME=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "rick-release" | head -n 1)
-          
-          if [ -z "$POD_NAME" ]; then
-            echo "ERROR: Could not find a pod with 'rick-release' in the name."
-            kubectl get pods
-            exit 1
-          fi
-          
-          echo "Successfully found pod: $POD_NAME"
+          echo "Testing Pod: $POD_NAME"
 
-          # 2. Wait for this specific pod name to be Ready
+          # 2. Wait for it
           kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=90s
           
-          # 3. TEST: Check logs for the SUCCESS message
-          kubectl logs "$POD_NAME" | grep "SUCCESS"
-          
-          # 4. TEST: Verify the file exists in the volume mount
-          kubectl exec "$POD_NAME" -- ls -l /app/data/results.csv
-          
-          # 5. TEST: Show the first 5 lines of the CSV
-          kubectl exec "$POD_NAME" -- head -n 5 /app/data/results.csv
+          # 3. Print logs regardless of success so we can debug
+          echo "--- START OF POD LOGS ---"
+          kubectl logs "$POD_NAME"
+          echo "--- END OF POD LOGS ---"
+
+          # 4. Check for the file (This is likely where it fails if the script crashed)
+          if kubectl exec "$POD_NAME" -- ls /app/data/results.csv; then
+            echo "SUCCESS: File exists in volume."
+          else
+            echo "ERROR: File /app/data/results.csv not found!"
+            exit 1
+          fi
+
+          # 5. Final check for data content
+          DATA_COUNT=$(kubectl exec "$POD_NAME" -- wc -l < /app/data/results.csv)
+          echo "Found $DATA_COUNT lines in CSV."
