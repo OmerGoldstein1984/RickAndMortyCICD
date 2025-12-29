@@ -1,0 +1,9 @@
+image:
+  repository: omergldb/rick-morty-script
+  tag: "v6"
+  pullPolicy: Always
+
+# This block is what was missing!
+config:
+  status: "alive"
+  origin: "Earth"

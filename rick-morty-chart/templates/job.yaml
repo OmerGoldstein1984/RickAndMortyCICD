@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rick-morty-chart.fullname" . }}
+spec:
+  template:
+    spec:
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        command: ["/bin/sh", "-c"]
+        # The sleep keeps the pod alive so you have time to 'kubectl cp'
+        args: ["python app.py && echo 'Finished' && sleep 600"]
+        volumeMounts:
+        - name: data-storage
+          mountPath: /app/data
+        env:
+        - name: TARGET_STATUS
+          value: {{ .Values.targetStatus | quote }}
+        - name: TARGET_ORIGIN
+          value: {{ .Values.targetOrigin | quote }}
+      restartPolicy: OnFailure
+      volumes:
+      - name: data-storage
+        emptyDir: {}

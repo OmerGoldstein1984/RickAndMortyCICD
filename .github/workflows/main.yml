@@ -1,0 +1,43 @@
+name: Rick and Morty Pipeline
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  kubernetes-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # 1. Initiate small kubernetes cluster (Kind)
+      - name: Create KinD Cluster
+        uses: helm/kind-action@v1.4.0
+
+      # 2. Create the Docker image from Dockerfile
+      - name: Build local Docker image
+        run: |
+          docker build -t omergldb/rick-morty-script:v6 .
+          kind load docker-image omergldb/rick-morty-script:v6 --name chart-testing
+
+      # 3. Deploy the application to the local cluster
+      - name: Deploy Helm Chart
+        run: |
+          helm install rick-release ./rick-morty-chart \
+            --set image.repository=omergldb/rick-morty-script \
+            --set image.tag=v6
+
+      # 4. Run tests to application endpoints (Verify Output)
+      - name: Verify Results
+        run: |
+          # Wait for Job completion
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=rick-release --timeout=90s
+          
+          # Capture pod name safely in Linux environment
+          POD_NAME=$(kubectl get pods -l app.kubernetes.io/instance=rick-release -o name)
+          
+          # Test: Check if SUCCESS message exists in logs
+          kubectl logs $POD_NAME | grep "SUCCESS"
+          
+          # Test: Check if file exists in the volume mount
+          kubectl exec $POD_NAME -- ls /app/data/results.csv

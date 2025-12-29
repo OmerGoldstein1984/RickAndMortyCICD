@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+build/
+dist/
+
+# Local Results (The files you generate)
+results.csv
+final_results.csv
+*.log
+
+# Environment Variables & Secrets
+.env
+secrets.yaml
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Helm
+charts/*/charts/
+charts/*/tmpmetrics/
