@@ -31,23 +31,29 @@ jobs:
       # 4. Run tests and Verify Output
       - name: Verify Results
         run: |
-          # Give Kubernetes a moment to initialize the Pod object
-          echo "Waiting for Pod creation..."
-          sleep 15
+          echo "Waiting 20 seconds for Pod to initialize..."
+          sleep 20
           
-          # Wait for the Pod to reach 'Ready' or 'Succeeded' state
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=rick-release --timeout=90s
+          # 1. Get the pod name using a name filter instead of a label selector
+          # This finds any pod with 'rick-release' in its name
+          POD_NAME=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "rick-release" | head -n 1)
           
-          # Capture the pod name accurately
-          # We use -o name to get the 'pod/name' format which is very reliable
-          POD_NAME=$(kubectl get pods -l app.kubernetes.io/instance=rick-release -o name)
-          echo "Found Pod: $POD_NAME"
+          if [ -z "$POD_NAME" ]; then
+            echo "ERROR: Could not find a pod with 'rick-release' in the name."
+            kubectl get pods
+            exit 1
+          fi
           
-          # TEST 1: Check logs for the SUCCESS message from your Python script
-          kubectl logs $POD_NAME | grep "SUCCESS"
+          echo "Successfully found pod: $POD_NAME"
+
+          # 2. Wait for this specific pod name to be Ready
+          kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=90s
           
-          # TEST 2: Verify the file exists in the volume mount
-          kubectl exec $POD_NAME -- ls -l /app/data/results.csv
+          # 3. TEST: Check logs for the SUCCESS message
+          kubectl logs "$POD_NAME" | grep "SUCCESS"
           
-          # TEST 3: Print the first few lines to ensure data is actually there
-          kubectl exec $POD_NAME -- head -n 5 /app/data/results.csv
+          # 4. TEST: Verify the file exists in the volume mount
+          kubectl exec "$POD_NAME" -- ls -l /app/data/results.csv
+          
+          # 5. TEST: Show the first 5 lines of the CSV
+          kubectl exec "$POD_NAME" -- head -n 5 /app/data/results.csv
