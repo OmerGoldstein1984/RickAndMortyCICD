@@ -33,19 +33,17 @@ jobs:
         run: |
           echo "Waiting for Pod to be ready..."
           sleep 20
-          # 1. Capture the pod name
+          
           POD_NAME=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" | grep "rick-release" | head -n 1)
           echo "Testing Pod: $POD_NAME"
 
-          # 2. Wait for it
           kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=90s
           
-          # 3. Print logs regardless of success so we can debug
           echo "--- START OF POD LOGS ---"
           kubectl logs "$POD_NAME"
           echo "--- END OF POD LOGS ---"
 
-          # 4. Check for the file (This is likely where it fails if the script crashed)
+          # Check for the file
           if kubectl exec "$POD_NAME" -- ls /app/data/results.csv; then
             echo "SUCCESS: File exists in volume."
           else
@@ -53,6 +51,14 @@ jobs:
             exit 1
           fi
 
-          # 5. Final check for data content
-          DATA_COUNT=$(kubectl exec "$POD_NAME" -- wc -l < /app/data/results.csv)
+          # FIXED: Run the command INSIDE the pod to count lines
+          DATA_COUNT=$(kubectl exec "$POD_NAME" -- sh -c "wc -l < /app/data/results.csv")
           echo "Found $DATA_COUNT lines in CSV."
+          
+          # Final Step: Ensure there is actually data (more than 1 line for header)
+          if [ "$DATA_COUNT" -gt 1 ]; then
+            echo "Pipeline Verified: Data successfully written."
+          else
+            echo "Error: CSV is empty."
+            exit 1
+          fi
