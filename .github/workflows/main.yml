@@ -18,6 +18,7 @@ jobs:
       - name: Build local Docker image
         run: |
           docker build -t omergldb/rick-morty-script:v6 .
+          # Load the image into the Kind nodes so it's available for deployment
           kind load docker-image omergldb/rick-morty-script:v6 --name chart-testing
 
       # 3. Deploy the application to the local cluster
@@ -27,17 +28,26 @@ jobs:
             --set image.repository=omergldb/rick-morty-script \
             --set image.tag=v6
 
-      # 4. Run tests to application endpoints (Verify Output)
+      # 4. Run tests and Verify Output
       - name: Verify Results
         run: |
-          # Wait for Job completion
+          # Give Kubernetes a moment to initialize the Pod object
+          echo "Waiting for Pod creation..."
+          sleep 15
+          
+          # Wait for the Pod to reach 'Ready' or 'Succeeded' state
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=rick-release --timeout=90s
           
-          # Capture pod name safely in Linux environment
+          # Capture the pod name accurately
+          # We use -o name to get the 'pod/name' format which is very reliable
           POD_NAME=$(kubectl get pods -l app.kubernetes.io/instance=rick-release -o name)
+          echo "Found Pod: $POD_NAME"
           
-          # Test: Check if SUCCESS message exists in logs
+          # TEST 1: Check logs for the SUCCESS message from your Python script
           kubectl logs $POD_NAME | grep "SUCCESS"
           
-          # Test: Check if file exists in the volume mount
-          kubectl exec $POD_NAME -- ls /app/data/results.csv
+          # TEST 2: Verify the file exists in the volume mount
+          kubectl exec $POD_NAME -- ls -l /app/data/results.csv
+          
+          # TEST 3: Print the first few lines to ensure data is actually there
+          kubectl exec $POD_NAME -- head -n 5 /app/data/results.csv
